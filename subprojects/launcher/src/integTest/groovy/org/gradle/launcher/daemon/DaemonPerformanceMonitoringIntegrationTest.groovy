@@ -20,31 +20,80 @@ package org.gradle.launcher.daemon
 
 import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
 import org.gradle.launcher.daemon.server.health.DaemonStatus
+import spock.lang.Unroll
 
 class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
-    def "when build leaks more than available memory the daemon is expired eagerly"() {
-        expect:
-        daemonIsExpiredEagerly("-Xmx30m")
+    int maxBuilds
+    String heapSize
+    int leakRate
+
+    @Unroll
+    def "when build leaks quickly daemon is expired eagerly (#heap heap)"() {
+        when:
+        maxBuilds = builds
+        heapSize = heap
+        leakRate = rate
+
+        then:
+        daemonIsExpiredEagerly()
+
+        where:
+        builds | heap    | rate
+        10     | "200m"  | 4000
+        10     | "1024m" | 15000
+    }
+
+    @Unroll
+    def "when build leaks slowly daemon is eventually expired (#heap heap)"() {
+        when:
+        maxBuilds = builds
+        heapSize = heap
+        leakRate = rate
+
+        then:
+        daemonIsExpiredEagerly()
+
+        where:
+        builds | heap    | rate
+        40     | "200m"  | 500
+        40     | "1024m" | 3000
     }
 
     def "when build leaks within available memory the daemon is not expired"() {
-        expect:
-        !daemonIsExpiredEagerly("-Xmx500m")
+        when:
+        maxBuilds = 20
+        heapSize = "500m"
+        leakRate = 300
+
+        then:
+        !daemonIsExpiredEagerly()
     }
 
-    private boolean daemonIsExpiredEagerly(String xmx) {
+    private boolean daemonIsExpiredEagerly() {
+        def dataFile = file("stats")
         setupLeakyBuild()
         int newDaemons = 0
-        for (int i = 0; i < 10; i++) {
-            executer.noExtraLogging()
-            executer.withBuildJvmOpts("-D${DaemonStatus.EXPIRE_AT_PROPERTY}=80", xmx, "-Dorg.gradle.daemon.performance.logging=true")
-            def r = run()
-            if (r.output.contains("Starting build in new daemon [memory: ")) {
-                newDaemons++;
+        try {
+            for (int i = 0; i < maxBuilds; i++) {
+                executer.noExtraLogging()
+                executer.withBuildJvmOpts("-D${DaemonStatus.EXPIRE_AT_PROPERTY}=80", "-Xmx${heapSize}", "-Dorg.gradle.daemon.performance.logging=true")
+                def r = run()
+                if (r.output.contains("Starting build in new daemon [memory: ")) {
+                    newDaemons++;
+                }
+                if (newDaemons > 1) {
+                    return true
+                }
+                def lines = r.output.readLines()
+                if (lines.find { it.contains "Rate: " }) {
+                    dataFile << lines[lines.findLastIndexOf { it.contains "Rate:" }]
+                    dataFile << lines[lines.findLastIndexOf { it.contains "Usage:" }]
+                    dataFile << "  " + lines[lines.findLastIndexOf { it.contains "Total time:" }]
+                    dataFile << "\n"
+                }
             }
-            if (newDaemons > 1) {
-                return true
-            }
+        } finally {
+            println dataFile.text
         }
         return false
     }
@@ -60,7 +109,7 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
 
             //simulate the leak
             (State.x * 1000).times {
-                State.map.put(it, "foo" * 300)
+                State.map.put(it, "foo" * ${leakRate})
             }
 
             println "Build: " + State.x

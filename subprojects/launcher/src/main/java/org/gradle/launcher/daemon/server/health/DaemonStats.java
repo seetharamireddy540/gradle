@@ -19,6 +19,8 @@ package org.gradle.launcher.daemon.server.health;
 import org.gradle.internal.TimeProvider;
 import org.gradle.internal.TrueTimeProvider;
 import org.gradle.internal.util.NumberUtil;
+import org.gradle.launcher.daemon.server.health.gc.GarbageCollectionMonitor;
+import org.gradle.launcher.daemon.server.health.gc.GarbageCollectionStats;
 import org.gradle.util.Clock;
 
 import static java.lang.String.format;
@@ -28,6 +30,7 @@ class DaemonStats {
     private final Clock totalTime;
     private final TimeProvider timeProvider;
     private final MemoryInfo memory;
+    private final GarbageCollectionMonitor gcMonitor;
 
     private int buildCount;
     private long currentBuildStart;
@@ -35,13 +38,14 @@ class DaemonStats {
     private int currentPerformance;
 
     DaemonStats() {
-        this(new Clock(), new TrueTimeProvider(), new MemoryInfo());
+        this(new Clock(), new TrueTimeProvider(), new MemoryInfo(), new GarbageCollectionMonitor());
     }
 
-    DaemonStats(Clock startTime, TimeProvider timeProvider, MemoryInfo memory) {
-        this.totalTime = startTime;
+    public DaemonStats(Clock totalTime, TimeProvider timeProvider, MemoryInfo memory, GarbageCollectionMonitor gcMonitor) {
+        this.totalTime = totalTime;
         this.timeProvider = timeProvider;
         this.memory = memory;
+        this.gcMonitor = gcMonitor;
     }
 
     /**
@@ -84,15 +88,13 @@ class DaemonStats {
         if (buildCount == 1) {
             return format("Starting build in new daemon [memory: %s]", NumberUtil.formatBytes(memory.getMaxMemory()));
         } else {
-            return format("Starting %s build in daemon [uptime: %s, performance: %s%%, memory: %s%% of %s]",
-                    NumberUtil.ordinal(buildCount), totalTime.getTime(), currentPerformance, getMemoryUsed(), NumberUtil.formatBytes(memory.getMaxMemory()));
+            GarbageCollectionStats stats = gcMonitor.getStats();
+            return format("Starting %s build in daemon [uptime: %s, GC rate: %.2f/s, Old Gen usage: %s%% of %s]",
+                    NumberUtil.ordinal(buildCount), totalTime.getTime(), stats.getRate(), stats.getUsage(), NumberUtil.formatBytes(stats.getMax()));
         }
     }
 
-    /**
-     * 0-100, the percentage of memory used of total memory available to the process
-     */
-    int getMemoryUsed() {
-        return NumberUtil.percentOf(memory.getCommittedMemory(), memory.getMaxMemory());
+    GarbageCollectionStats getGCStats() {
+        return gcMonitor.getStats();
     }
 }
