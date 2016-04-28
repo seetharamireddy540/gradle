@@ -20,12 +20,19 @@ package org.gradle.launcher.daemon
 
 import org.gradle.integtests.fixtures.daemon.DaemonIntegrationSpec
 import org.gradle.launcher.daemon.server.health.DaemonStatus
+import org.gradle.util.Requires
+import org.gradle.util.TestPrecondition
 import spock.lang.Unroll
 
 class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
     int maxBuilds
     String heapSize
     int leakRate
+    Closure leakyBuildScript
+
+    def setup() {
+        leakyBuildScript = OLD_GEN_LEAK
+    }
 
     @Unroll
     def "when build leaks quickly daemon is expired eagerly (#heap heap)"() {
@@ -55,8 +62,8 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
 
         where:
         builds | heap    | rate
-        40     | "200m"  | 500
-        40     | "1024m" | 3000
+        40     | "200m"  | 800
+        40     | "1024m" | 4000
     }
 
     def "when build leaks within available memory the daemon is not expired"() {
@@ -67,6 +74,18 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
 
         then:
         !daemonIsExpiredEagerly()
+    }
+
+    @Requires(TestPrecondition.JDK7_OR_EARLIER)
+    def "when build leaks permgen space daemon is expired"() {
+        when:
+        leakyBuildScript = PERM_GEN_LEAK
+        maxBuilds = 20
+        heapSize = "200m"
+        leakRate = 3000
+
+        then:
+        daemonIsExpiredEagerly()
     }
 
     private boolean daemonIsExpiredEagerly() {
@@ -85,12 +104,9 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
                     return true
                 }
                 def lines = r.output.readLines()
-                if (lines.find { it.contains "Rate: " }) {
-                    dataFile << lines[lines.findLastIndexOf { it.contains "Rate:" }]
-                    dataFile << lines[lines.findLastIndexOf { it.contains "Usage:" }]
-                    dataFile << "  " + lines[lines.findLastIndexOf { it.contains "Total time:" }]
-                    dataFile << "\n"
-                }
+                dataFile << lines[lines.findLastIndexOf { it.startsWith "Starting" }]
+                dataFile << "  " + lines[lines.findLastIndexOf { it.contains "Total time:" }]
+                dataFile << "\n"
             }
         } finally {
             println dataFile.text
@@ -99,20 +115,50 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
     }
 
     private void setupLeakyBuild() {
-
-        buildFile << """
-            class State {
-                static int x
-                static map = [:]
-            }
-            State.x++
-
-            //simulate the leak
-            (State.x * 1000).times {
-                State.map.put(it, "foo" * ${leakRate})
-            }
-
-            println "Build: " + State.x
-        """
+        buildFile << leakyBuildScript.call()
     }
+
+    private final Closure OLD_GEN_LEAK = { """
+        class State {
+            static int x
+            static map = [:]
+        }
+        State.x++
+
+        //simulate normal collectible objects
+        3000.times {
+            State.map.put(it, "foo" * ${leakRate})
+        }
+
+        //simulate the leak
+        1000.times {
+            State.map.put(UUID.randomUUID(), "foo" * ${leakRate})
+        }
+
+        println "Build: " + State.x
+    """ }
+
+    private final Closure PERM_GEN_LEAK = { """
+        import java.security.SecureClassLoader
+
+        class State {
+            static int x
+            static map = [:]
+        }
+        State.x++
+
+        //simulate normal collectible objects
+        3000.times {
+            State.map.put(it, "foo" * ${leakRate})
+        }
+
+        //simulate the leak
+        10000.times {
+            ClassLoader loader = new SecureClassLoader()
+            State.map.put(it, loader.loadClass("java.lang.String").newInstance())
+        }
+
+        println "Build: " + State.x
+    """ }
+
 }

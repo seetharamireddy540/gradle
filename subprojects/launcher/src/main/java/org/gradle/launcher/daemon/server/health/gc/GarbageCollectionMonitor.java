@@ -18,6 +18,7 @@ package org.gradle.launcher.daemon.server.health.gc;
 
 import com.sun.management.GarbageCollectionNotificationInfo;
 import com.sun.management.GcInfo;
+import org.gradle.api.JavaVersion;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
 
@@ -52,8 +53,16 @@ public class GarbageCollectionMonitor {
         }
     }
 
-    public GarbageCollectionStats getStats() {
+    public GarbageCollectionStats getOldGenStats() {
         return new GarbageCollectionStats("PS Old Gen", events.snapshot());
+    }
+
+    public GarbageCollectionStats getPermGenStats() {
+         if (!JavaVersion.current().isJava8Compatible()) {
+             return new GarbageCollectionStats("PS Perm Gen", events.snapshot());
+         } else {
+             return null;
+         }
     }
 
     private class GCNotificationListener implements NotificationListener {
@@ -74,7 +83,7 @@ public class GarbageCollectionMonitor {
 
         String formatCurrentStats() {
             StringBuilder builder = new StringBuilder();
-            GarbageCollectionStats stats = getStats();
+            GarbageCollectionStats stats = getOldGenStats();
             builder.append("\n  Current Stats:");
             builder.append("\n    Count: " + stats.getCount());
             builder.append("\n    Slope: " + stats.getSlope());

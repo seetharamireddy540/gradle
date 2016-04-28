@@ -17,6 +17,7 @@
 package org.gradle.launcher.daemon.server.health;
 
 import org.gradle.api.GradleException;
+import org.gradle.api.JavaVersion;
 import org.gradle.launcher.daemon.server.health.gc.GarbageCollectionMonitor;
 
 import static java.lang.String.format;
@@ -30,9 +31,22 @@ class DaemonStatus {
         String expireAt = System.getProperty(EXPIRE_AT_PROPERTY);
         int threshold = parseValue(expireAt, DEFAULT_EXPIRE_AT);
         return threshold != 0 //zero means the feature is off
-                && stats.getGCStats().getCount() == GarbageCollectionMonitor.EVENT_WINDOW // we have a full window of GC events
-                && stats.getGCStats().getUsage() > 80 // we are consistently above 80% heap usage after GC
-                && stats.getGCStats().getRate() > 1.5;// we are GC'ing faster than 1.5 times a second
+                && (isOldGenExhausted(stats) || isPermGenExhausted(stats));
+    }
+
+    boolean isOldGenExhausted(DaemonStats stats) {
+        return stats.getOldGenStats().getCount() == GarbageCollectionMonitor.EVENT_WINDOW // we have a full window of GC events
+            && stats.getOldGenStats().getUsage() > 80 // we are consistently above 80% heap usage after GC
+            && stats.getOldGenStats().getRate() > 1.5;// we are GC'ing faster than 1.5 times a second
+    }
+
+    boolean isPermGenExhausted(DaemonStats stats) {
+        if (JavaVersion.current().isJava8Compatible()) {
+            return false;
+        } else {
+            return stats.getOldGenStats().getCount() == GarbageCollectionMonitor.EVENT_WINDOW // we have a full window of GC events
+                && stats.getPermGenStats().getUsage() > 90; // we are consistently above 90% of Perm Gen after GC
+        }
     }
 
     private static int parseValue(String expireAt, int defaultValue) {

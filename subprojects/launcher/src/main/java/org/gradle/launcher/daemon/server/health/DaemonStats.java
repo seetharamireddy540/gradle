@@ -88,13 +88,23 @@ class DaemonStats {
         if (buildCount == 1) {
             return format("Starting build in new daemon [memory: %s]", NumberUtil.formatBytes(memory.getMaxMemory()));
         } else {
-            GarbageCollectionStats stats = gcMonitor.getStats();
-            return format("Starting %s build in daemon [uptime: %s, GC rate: %.2f/s, Old Gen usage: %s%% of %s]",
-                    NumberUtil.ordinal(buildCount), totalTime.getTime(), stats.getRate(), stats.getUsage(), NumberUtil.formatBytes(stats.getMax()));
+            GarbageCollectionStats stats = gcMonitor.getOldGenStats();
+            GarbageCollectionStats permGenStats = gcMonitor.getPermGenStats();
+            if (permGenStats != null) {
+                return format("Starting %s build in daemon [uptime: %s, performance: %s%%, GC rate: %.2f/s, Old Gen usage: %s%% of %s, Perm Gen usage: %s%% of %s]",
+                    NumberUtil.ordinal(buildCount), totalTime.getTime(), getCurrentPerformance(), stats.getRate(), stats.getUsage(), NumberUtil.formatBytes(stats.getMax()), permGenStats.getUsage(), NumberUtil.formatBytes(permGenStats.getMax()));
+            } else {
+                return format("Starting %s build in daemon [uptime: %s, performance: %s%%, GC rate: %.2f/s, Old Gen usage: %s%% of %s]",
+                    NumberUtil.ordinal(buildCount), totalTime.getTime(), getCurrentPerformance(), stats.getRate(), stats.getUsage(), NumberUtil.formatBytes(stats.getMax()));
+            }
         }
     }
 
-    GarbageCollectionStats getGCStats() {
-        return gcMonitor.getStats();
+    GarbageCollectionStats getOldGenStats() {
+        return gcMonitor.getOldGenStats();
+    }
+
+    GarbageCollectionStats getPermGenStats() {
+        return gcMonitor.getPermGenStats();
     }
 }

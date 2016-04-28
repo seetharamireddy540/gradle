@@ -77,6 +77,10 @@ public class GarbageCollectionStats {
     }
 
     static long calculateAverageUsage(String poolName, Set<GcInfo> events) {
+        if (events.size() < 1) {
+            return 0;
+        }
+
         long total = 0;
         for (GcInfo event : events) {
             MemoryUsage usage = event.getMemoryUsageAfterGc().get(poolName);
@@ -86,6 +90,10 @@ public class GarbageCollectionStats {
     }
 
     static long calculateMaxSize(String poolName, Set<GcInfo> events) {
+        if (events.size() < 2) {
+            return 0;
+        }
+
         // Maximum pool size is fixed, so we should only need to get it from the first event
         MemoryUsage usage = events.iterator().next().getMemoryUsageAfterGc().get(poolName);
         return usage.getMax();
