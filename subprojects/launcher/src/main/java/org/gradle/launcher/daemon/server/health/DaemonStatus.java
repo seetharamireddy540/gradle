@@ -45,7 +45,7 @@ class DaemonStatus {
             return false;
         } else {
             return stats.getOldGenStats().getCount() == GarbageCollectionMonitor.EVENT_WINDOW // we have a full window of GC events
-                && stats.getPermGenStats().getUsage() > 90; // we are consistently above 90% of Perm Gen after GC
+                && stats.getPermGenStats().getUsage() > 85; // we are consistently above 85% of Perm Gen after GC
         }
     }
 

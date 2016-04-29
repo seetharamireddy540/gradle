@@ -24,7 +24,6 @@ import java.util.Set;
 
 public class GarbageCollectionStats {
     final private String poolName;
-    final private double slope;
     final private double rate;
     final private long used;
     final private long max;
@@ -32,30 +31,10 @@ public class GarbageCollectionStats {
 
     public GarbageCollectionStats(String poolName, Set<GcInfo> events) {
         this.poolName = poolName;
-        this.slope = calculateSlope(poolName, events);
         this.rate = calculateRate(events);
         this.used = calculateAverageUsage(poolName, events);
         this.max = calculateMaxSize(poolName, events);
         this.count = events.size();
-    }
-
-    static double calculateSlope(String poolName, Set<GcInfo> events) {
-        if (events.size() < 2) {
-            return Double.NaN;
-        }
-
-        double sumXX = 0;
-        double sumXY = 0;
-        int y = 0;
-        for (GcInfo event : events) {
-            MemoryUsage afterUsage = event.getMemoryUsageAfterGc().get(poolName);
-            long remaining = afterUsage.getMax() - afterUsage.getUsed();
-            sumXX += remaining * remaining;
-            sumXY += remaining * y;
-            y++;
-        }
-
-        return sumXY / sumXX;
     }
 
     static double calculateRate(Set<GcInfo> events) {
@@ -101,10 +80,6 @@ public class GarbageCollectionStats {
 
     public String getPoolName() {
         return poolName;
-    }
-
-    public double getSlope() {
-        return slope;
     }
 
     public double getRate() {

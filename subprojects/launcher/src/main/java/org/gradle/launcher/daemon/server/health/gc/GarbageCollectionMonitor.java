@@ -86,7 +86,6 @@ public class GarbageCollectionMonitor {
             GarbageCollectionStats stats = getOldGenStats();
             builder.append("\n  Current Stats:");
             builder.append("\n    Count: " + stats.getCount());
-            builder.append("\n    Slope: " + stats.getSlope());
             builder.append("\n    Rate: " + stats.getRate());
             builder.append("\n    Usage: " + stats.getUsage());
             return builder.toString();
