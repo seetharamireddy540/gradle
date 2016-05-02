@@ -31,7 +31,7 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
     Closure leakyBuildScript
 
     def setup() {
-        leakyBuildScript = OLD_GEN_LEAK
+        leakyBuildScript = TENURED_HEAP_LEAK
     }
 
     @Unroll
@@ -76,7 +76,7 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
         !daemonIsExpiredEagerly()
     }
 
-    @Requires(TestPrecondition.JDK7_OR_EARLIER)
+    @Requires([TestPrecondition.JDK7_OR_EARLIER, TestPrecondition.NOT_JDK_IBM])
     def "when build leaks permgen space daemon is expired"() {
         when:
         leakyBuildScript = PERM_GEN_LEAK
@@ -118,7 +118,7 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
         buildFile << leakyBuildScript()
     }
 
-    private final Closure OLD_GEN_LEAK = { """
+    private final Closure TENURED_HEAP_LEAK = { """
         class State {
             static int x
             static map = [:]
@@ -178,5 +178,4 @@ class DaemonPerformanceMonitoringIntegrationTest extends DaemonIntegrationSpec {
             println "Build: " + State.x
         """
     }
-
 }

@@ -16,97 +16,215 @@
 
 package org.gradle.launcher.daemon.server.health.gc;
 
-import com.sun.management.GarbageCollectionNotificationInfo;
-import com.sun.management.GcInfo;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import org.gradle.api.JavaVersion;
 import org.gradle.api.logging.Logger;
 import org.gradle.api.logging.Logging;
+import org.gradle.api.specs.Spec;
+import org.gradle.util.CollectionUtils;
 
-import javax.management.InstanceNotFoundException;
-import javax.management.Notification;
-import javax.management.NotificationFilterSupport;
-import javax.management.NotificationListener;
+import javax.management.*;
 import javax.management.openmbean.CompositeData;
-import java.lang.management.GarbageCollectorMXBean;
-import java.lang.management.ManagementFactory;
-import java.lang.management.MemoryUsage;
+import java.lang.management.*;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class GarbageCollectionMonitor {
     final public static int EVENT_WINDOW = 20;
     final Logger logger = Logging.getLogger(GarbageCollectionMonitor.class);
-    final SlidingWindow<GcInfo> events = new DefaultSlidingWindow<GcInfo>(EVENT_WINDOW);
+    final Map<String, SlidingWindow<GarbageCollectionEvent>> events;
+    final JVMStrategy jvmStrategy = JVMStrategy.current();
+    final ScheduledExecutorService pollingExecutor;
 
-    public GarbageCollectionMonitor() {
-        registerGCNotificationListener();
-    }
+    public GarbageCollectionMonitor(ScheduledExecutorService pollingExecutor) {
+        this.pollingExecutor = pollingExecutor;
 
-    private void registerGCNotificationListener() {
-        logger.warn("Registering GC notification listener");
-        NotificationFilterSupport filter = new GarbageCollectionEventFilter("PS MarkSweep", "end of major GC");
-        for (GarbageCollectorMXBean gc : ManagementFactory.getGarbageCollectorMXBeans()) {
-            try {
-                ManagementFactory.getPlatformMBeanServer().addNotificationListener(gc.getObjectName(), new GCNotificationListener(events), filter, null);
-            } catch (InstanceNotFoundException e) {
-                e.printStackTrace();
+        List<String> memoryPoolNames = jvmStrategy.getPoolNames();
+
+        ImmutableMap.Builder<String, SlidingWindow<GarbageCollectionEvent>> builder = new ImmutableMap.Builder<String, SlidingWindow<GarbageCollectionEvent>>();
+        for (String memoryPool : memoryPoolNames) {
+            builder.put(memoryPool, new DefaultSlidingWindow<GarbageCollectionEvent>(EVENT_WINDOW));
+        }
+        events = builder.build();
+
+        if (!memoryPoolNames.isEmpty()) {
+            if (jvmStrategy.isNotificationSupported()) {
+                registerGCNotificationListener(memoryPoolNames);
+            } else {
+                pollForValues(jvmStrategy.getGarbageCollectorName(), jvmStrategy.getPoolNames());
             }
         }
     }
 
-    public GarbageCollectionStats getOldGenStats() {
-        return new GarbageCollectionStats("PS Old Gen", events.snapshot());
+    private void pollForValues(String garbageCollectorName, List<String> memoryPoolNames) {
+        pollingExecutor.scheduleAtFixedRate(new GCCheck(memoryPoolNames, garbageCollectorName), 1, 1, TimeUnit.SECONDS);
+    }
+
+    private void registerGCNotificationListener(List<String> memoryPoolNames) {
+        logger.warn("Registering GC notification listener");
+
+        for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+            if (memoryPoolNames.contains(pool.getName()) && pool.isCollectionUsageThresholdSupported()) {
+                pool.setCollectionUsageThreshold(1);
+                logger.warn("Collection usage notification configured for: " + pool.getName());
+            } else {
+                logger.warn("Collection usage not supported for: " + pool.getName());
+            }
+        }
+
+        NotificationFilter filter = new GarbageCollectionEventFilter(memoryPoolNames);
+        MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
+        NotificationEmitter emitter = (NotificationEmitter) memory;
+        emitter.addNotificationListener(new GCNotificationListener(events), filter, null);
+    }
+
+    public GarbageCollectionStats getTenuredStats() {
+        return new GarbageCollectionStats(events.get(jvmStrategy.getTenuredPoolName()).snapshot());
     }
 
     public GarbageCollectionStats getPermGenStats() {
-         if (!JavaVersion.current().isJava8Compatible()) {
-             return new GarbageCollectionStats("PS Perm Gen", events.snapshot());
+         if (jvmStrategy.getPermGenPoolName() != null) {
+             return new GarbageCollectionStats(events.get(jvmStrategy.getPermGenPoolName()).snapshot());
          } else {
              return null;
          }
     }
 
-    private class GCNotificationListener implements NotificationListener {
-        final SlidingWindow<GcInfo> events;
+    String formatCurrentStats(String poolName) {
+        StringBuilder builder = new StringBuilder();
+        GarbageCollectionStats stats = new GarbageCollectionStats(events.get(poolName).snapshot());
+        builder.append("\n  Current Stats:");
+        builder.append("\n    Count: " + stats.getCount());
+        builder.append("\n    Rate: " + stats.getRate());
+        builder.append("\n    Usage: " + stats.getUsage());
+        return builder.toString();
+    }
 
-        public GCNotificationListener(SlidingWindow<GcInfo> events) {
+    String formatGCInfo(String memoryPool, GarbageCollectionEvent event) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("\n  Pool State: " + event.getUsage().toString());
+        return builder.toString();
+    }
+
+    private class GCCheck implements Runnable {
+        private final List<String> memoryPools;
+        private final String garbageCollector;
+
+        public GCCheck(List<String> memoryPools, String garbageCollector) {
+            this.memoryPools = memoryPools;
+            this.garbageCollector = garbageCollector;
+        }
+
+        @Override
+        public void run() {
+            List<GarbageCollectorMXBean> garbageCollectorMXBeans = ManagementFactory.getGarbageCollectorMXBeans();
+            GarbageCollectorMXBean garbageCollectorMXBean = CollectionUtils.findFirst(garbageCollectorMXBeans, new Spec<GarbageCollectorMXBean>() {
+                @Override
+                public boolean isSatisfiedBy(GarbageCollectorMXBean mbean) {
+                    return mbean.getName().equals(garbageCollector);
+                }
+            });
+
+            List<MemoryPoolMXBean> memoryPoolMXBeans = ManagementFactory.getMemoryPoolMXBeans();
+            for (MemoryPoolMXBean memoryPoolMXBean : memoryPoolMXBeans) {
+                String pool = memoryPoolMXBean.getName();
+                if (memoryPools.contains(pool)) {
+                    GarbageCollectionEvent event = new GarbageCollectionEvent(System.currentTimeMillis(), memoryPoolMXBean.getCollectionUsage(), garbageCollectorMXBean.getCollectionCount());
+                    events.get(pool).slideAndInsert(event);
+                    logger.warn("Garbage Collection Check (" + pool + "): " + formatCurrentStats(pool) + formatGCInfo(pool, event));
+                }
+            }
+        }
+    }
+
+    private class GCNotificationListener implements NotificationListener {
+        final Map<String, SlidingWindow<GarbageCollectionEvent>> events;
+
+        public GCNotificationListener(Map<String, SlidingWindow<GarbageCollectionEvent>> events) {
             this.events = events;
         }
 
         @Override
         public void handleNotification(Notification notification, Object handback) {
-            if (notification.getType().equals(GarbageCollectionNotificationInfo.GARBAGE_COLLECTION_NOTIFICATION)) {
-                GarbageCollectionNotificationInfo info = GarbageCollectionNotificationInfo.from((CompositeData) notification.getUserData());
-                events.slideAndInsert(info.getGcInfo());
-                logger.warn("Garbage Collection Event: " + formatCurrentStats() + formatGCInfo(info));
-            }
-        }
-
-        String formatCurrentStats() {
-            StringBuilder builder = new StringBuilder();
-            GarbageCollectionStats stats = getOldGenStats();
-            builder.append("\n  Current Stats:");
-            builder.append("\n    Count: " + stats.getCount());
-            builder.append("\n    Rate: " + stats.getRate());
-            builder.append("\n    Usage: " + stats.getUsage());
-            return builder.toString();
-        }
-
-        String formatGCInfo(GarbageCollectionNotificationInfo info) {
-            StringBuilder builder = new StringBuilder();
-            builder.append("\n  " + info.getGcName() + ":" + info.getGcAction() + ":" + info.getGcCause());
-            GcInfo gcInfo = info.getGcInfo();
-            builder.append("\n    id: " + gcInfo.getId());
-            builder.append("\n    duration: " + gcInfo.getDuration());
-            Map<String, MemoryUsage> beforeGc = gcInfo.getMemoryUsageBeforeGc();
-            Map<String, MemoryUsage> afterGc = gcInfo.getMemoryUsageAfterGc();
-            for (String pool : new String[] { "PS Old Gen", "PS Perm Gen" }) {
-                if (beforeGc.containsKey(pool)) {
-                    builder.append("\n    " + pool);
-                    builder.append("\n      before: " + beforeGc.get(pool).toString());
-                    builder.append("\n       after: " + afterGc.get(pool).toString());
+            if (notification.getType().equals(MemoryNotificationInfo.MEMORY_COLLECTION_THRESHOLD_EXCEEDED)) {
+                MemoryNotificationInfo info = MemoryNotificationInfo.from((CompositeData) notification.getUserData());
+                String memoryPoolName = info.getPoolName();
+                if (events.containsKey(memoryPoolName)) {
+                    GarbageCollectionEvent event = new GarbageCollectionEvent(notification.getTimeStamp(), info.getUsage());
+                    events.get(memoryPoolName).slideAndInsert(event);
+                    logger.warn("Garbage Collection Event (" + memoryPoolName + "): " + formatCurrentStats(memoryPoolName) + formatGCInfo(memoryPoolName, event));
                 }
             }
-            return builder.toString();
+        }
+    }
+
+    public enum JVMStrategy {
+        IBM("Java heap", null, "MarkSweepCompact", false),
+        SUN_HOTSPOT_JDK7_OR_EARLIER("PS Old Gen", "PS Perm Gen", "PS MarkSweep", false),
+        SUN_HOTSPOT_JDK8_OR_LATER("PS Old Gen", null, "PS MarkSweep", false),
+        UNSUPPORTED(null, null, null, false);
+
+        final String tenuredPoolName;
+        final String permGenPoolName;
+        final String garbageCollectorName;
+        final boolean notificationSupported;
+
+        JVMStrategy(String tenuredPoolName, String permGenPoolName, String garbageCollectorName, boolean notificationSupported) {
+            this.tenuredPoolName = tenuredPoolName;
+            this.permGenPoolName = permGenPoolName;
+            this.garbageCollectorName = garbageCollectorName;
+            this.notificationSupported = notificationSupported;
+        }
+
+        static JVMStrategy current() {
+            String vendor = System.getProperty("java.vm.vendor");
+
+            if (vendor.equals("IBM Corporation")) {
+                return IBM;
+            }
+
+            if (vendor.equals("Oracle Corporation")) {
+                if (JavaVersion.current().isJava8Compatible()) {
+                    return SUN_HOTSPOT_JDK8_OR_LATER;
+                } else {
+                    return SUN_HOTSPOT_JDK7_OR_EARLIER;
+                }
+            }
+
+            return UNSUPPORTED;
+        }
+
+        public List<String> getPoolNames() {
+            ImmutableList.Builder<String> builder = ImmutableList.builder();
+
+            if (permGenPoolName != null) {
+                builder.add(permGenPoolName);
+            }
+
+            if (tenuredPoolName != null) {
+                builder.add(tenuredPoolName);
+            }
+
+            return builder.build();
+        }
+
+        public String getTenuredPoolName() {
+            return tenuredPoolName;
+        }
+
+        public String getPermGenPoolName() {
+            return permGenPoolName;
+        }
+
+        public String getGarbageCollectorName() {
+            return garbageCollectorName;
+        }
+
+        public boolean isNotificationSupported() {
+            return notificationSupported;
         }
     }
 }

@@ -17,8 +17,6 @@
 package org.gradle.launcher.daemon.server.health;
 
 import org.gradle.api.GradleException;
-import org.gradle.api.JavaVersion;
-import org.gradle.launcher.daemon.server.health.gc.GarbageCollectionMonitor;
 
 import static java.lang.String.format;
 
@@ -35,17 +33,15 @@ class DaemonStatus {
     }
 
     boolean isOldGenExhausted(DaemonStats stats) {
-        return stats.getOldGenStats().getCount() == GarbageCollectionMonitor.EVENT_WINDOW // we have a full window of GC events
-            && stats.getOldGenStats().getUsage() > 80 // we are consistently above 80% heap usage after GC
-            && stats.getOldGenStats().getRate() > 1.5;// we are GC'ing faster than 1.5 times a second
+        return stats.getTenuredStats().getUsage() > 80 // we are consistently above 80% heap usage after GC
+            && stats.getTenuredStats().getRate() > 1.5;// we are GC'ing faster than 1.5 times a second
     }
 
     boolean isPermGenExhausted(DaemonStats stats) {
-        if (JavaVersion.current().isJava8Compatible()) {
-            return false;
+        if (stats.getPermGenStats() != null) {
+            return stats.getPermGenStats().getUsage() > 85; // we are consistently above 85% of Perm Gen after GC
         } else {
-            return stats.getOldGenStats().getCount() == GarbageCollectionMonitor.EVENT_WINDOW // we have a full window of GC events
-                && stats.getPermGenStats().getUsage() > 85; // we are consistently above 85% of Perm Gen after GC
+            return false;
         }
     }
 

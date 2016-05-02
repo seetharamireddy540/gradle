@@ -18,13 +18,21 @@ package org.gradle.launcher.daemon.server.health;
 
 import org.gradle.launcher.daemon.server.api.DaemonCommandAction;
 
-public class DefaultDaemonHealthServices implements DaemonHealthServices {
+import java.util.concurrent.ScheduledExecutorService;
 
+public class DefaultDaemonHealthServices implements DaemonHealthServices {
+    private final ScheduledExecutorService scheduledExecutorService;
     private final HintGCAfterBuild hygieneAction = new HintGCAfterBuild();
-    private final DaemonStats stats = new DaemonStats();
+    private final DaemonStats stats;
     private final DaemonStatus status = new DaemonStatus();
     private final HealthLogger logger = new HealthLogger();
-    private final DaemonHealthTracker tracker = new DaemonHealthTracker(stats, status, logger);
+    private final DaemonHealthTracker tracker;
+
+    public DefaultDaemonHealthServices(ScheduledExecutorService scheduledExecutorService) {
+        this.scheduledExecutorService = scheduledExecutorService;
+        this.stats = new DaemonStats(scheduledExecutorService);
+        this.tracker = new DaemonHealthTracker(stats, status, logger);
+    }
 
     /**
      * {@inheritDoc}

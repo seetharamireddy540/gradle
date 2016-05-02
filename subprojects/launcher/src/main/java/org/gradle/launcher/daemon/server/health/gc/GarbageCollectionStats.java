@@ -16,70 +16,103 @@
 
 package org.gradle.launcher.daemon.server.health.gc;
 
-import com.sun.management.GcInfo;
 import org.gradle.internal.util.NumberUtil;
 
 import java.lang.management.MemoryUsage;
 import java.util.Set;
 
 public class GarbageCollectionStats {
-    final private String poolName;
     final private double rate;
     final private long used;
     final private long max;
-    final private int count;
+    final private long count;
 
-    public GarbageCollectionStats(String poolName, Set<GcInfo> events) {
-        this.poolName = poolName;
+    public GarbageCollectionStats(Set<GarbageCollectionEvent> events) {
         this.rate = calculateRate(events);
-        this.used = calculateAverageUsage(poolName, events);
-        this.max = calculateMaxSize(poolName, events);
-        this.count = events.size();
+        this.used = calculateAverageUsage(events);
+        this.max = calculateMaxSize(events);
+        this.count = getCount(events);
     }
 
-    static double calculateRate(Set<GcInfo> events) {
+    static long getCount(Set<GarbageCollectionEvent> events) {
+        long lastCount = 0;
+
+        for (GarbageCollectionEvent event : events) {
+            lastCount = event.getCount();
+        }
+
+        return lastCount == GarbageCollectionEvent.COUNT_UNAVAILABLE ? events.size() : lastCount;
+    }
+
+    static double calculateRate(Set<GarbageCollectionEvent> events) {
         if (events.size() < 2) {
             return Double.NaN;
         }
 
         long firstGC = 0;
         long lastGC = 0;
-        for (GcInfo event : events) {
+        long lastCount = GarbageCollectionEvent.COUNT_UNAVAILABLE;
+        for (GarbageCollectionEvent event : events) {
+            if (event.getCount() != GarbageCollectionEvent.COUNT_UNAVAILABLE) {
+                // Skip if this was a polling event and the garbage collector did not fire in between events
+                if (event.getCount() == lastCount || event.getCount() == 0) {
+                    continue;
+                }
+            }
+
+            lastCount = event.getCount();
+
             if (firstGC == 0) {
-                firstGC = event.getStartTime();
+                firstGC = event.getTimestamp();
             } else {
-                lastGC = event.getStartTime();
+                lastGC = event.getTimestamp();
             }
         }
         long elapsed = lastGC - firstGC;
-        return ((double)events.size()) / elapsed * 1000;
+        long gcCount = (lastCount == GarbageCollectionEvent.COUNT_UNAVAILABLE ? events.size() : lastCount) - 1;
+        return ((double)gcCount) / elapsed * 1000;
     }
 
-    static long calculateAverageUsage(String poolName, Set<GcInfo> events) {
+    static long calculateAverageUsage(Set<GarbageCollectionEvent> events) {
         if (events.size() < 1) {
             return 0;
         }
 
         long total = 0;
-        for (GcInfo event : events) {
-            MemoryUsage usage = event.getMemoryUsageAfterGc().get(poolName);
-            total += usage.getUsed();
+        long lastCount = GarbageCollectionEvent.COUNT_UNAVAILABLE;
+        for (GarbageCollectionEvent event : events) {
+            if (event.getCount() != GarbageCollectionEvent.COUNT_UNAVAILABLE) {
+                // Skip if this was a polling event and the garbage collector did not fire in between events
+                if (event.getCount() == lastCount || event.getCount() == 0) {
+                    continue;
+                }
+            }
+
+            MemoryUsage usage = event.getUsage();
+            if (event.getCount() != GarbageCollectionEvent.COUNT_UNAVAILABLE) {
+                if (lastCount == GarbageCollectionEvent.COUNT_UNAVAILABLE) {
+                    total += (usage.getUsed() * event.getCount());
+                } else {
+                    total += (usage.getUsed() * (event.getCount() - lastCount));
+                }
+            } else {
+                total += usage.getUsed();
+            }
+
+            lastCount = event.getCount();
         }
-        return total / events.size();
+        long gcCount = lastCount == GarbageCollectionEvent.COUNT_UNAVAILABLE ? events.size() : lastCount;
+        return total / gcCount;
     }
 
-    static long calculateMaxSize(String poolName, Set<GcInfo> events) {
+    static long calculateMaxSize(Set<GarbageCollectionEvent> events) {
         if (events.size() < 2) {
             return 0;
         }
 
         // Maximum pool size is fixed, so we should only need to get it from the first event
-        MemoryUsage usage = events.iterator().next().getMemoryUsageAfterGc().get(poolName);
+        MemoryUsage usage = events.iterator().next().getUsage();
         return usage.getMax();
-    }
-
-    public String getPoolName() {
-        return poolName;
     }
 
     public double getRate() {
@@ -98,7 +131,7 @@ public class GarbageCollectionStats {
         return max;
     }
 
-    public int getCount() {
+    public long getCount() {
         return count;
     }
 }

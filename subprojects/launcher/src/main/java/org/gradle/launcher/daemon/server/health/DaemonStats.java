@@ -23,6 +23,8 @@ import org.gradle.launcher.daemon.server.health.gc.GarbageCollectionMonitor;
 import org.gradle.launcher.daemon.server.health.gc.GarbageCollectionStats;
 import org.gradle.util.Clock;
 
+import java.util.concurrent.ScheduledExecutorService;
+
 import static java.lang.String.format;
 
 class DaemonStats {
@@ -37,8 +39,8 @@ class DaemonStats {
     private long allBuildsTime;
     private int currentPerformance;
 
-    DaemonStats() {
-        this(new Clock(), new TrueTimeProvider(), new MemoryInfo(), new GarbageCollectionMonitor());
+    DaemonStats(ScheduledExecutorService scheduledExecutorService) {
+        this(new Clock(), new TrueTimeProvider(), new MemoryInfo(), new GarbageCollectionMonitor(scheduledExecutorService));
     }
 
     public DaemonStats(Clock totalTime, TimeProvider timeProvider, MemoryInfo memory, GarbageCollectionMonitor gcMonitor) {
@@ -88,20 +90,20 @@ class DaemonStats {
         if (buildCount == 1) {
             return format("Starting build in new daemon [memory: %s]", NumberUtil.formatBytes(memory.getMaxMemory()));
         } else {
-            GarbageCollectionStats stats = gcMonitor.getOldGenStats();
+            GarbageCollectionStats tenuredStats = gcMonitor.getTenuredStats();
             GarbageCollectionStats permGenStats = gcMonitor.getPermGenStats();
             if (permGenStats != null) {
-                return format("Starting %s build in daemon [uptime: %s, performance: %s%%, GC rate: %.2f/s, Old Gen usage: %s%% of %s, Perm Gen usage: %s%% of %s]",
-                    NumberUtil.ordinal(buildCount), totalTime.getTime(), getCurrentPerformance(), stats.getRate(), stats.getUsage(), NumberUtil.formatBytes(stats.getMax()), permGenStats.getUsage(), NumberUtil.formatBytes(permGenStats.getMax()));
+                return format("Starting %s build in daemon [uptime: %s, performance: %s%%, GC rate: %.2f/s, tenured heap usage: %s%% of %s, perm gen usage: %s%% of %s]",
+                    NumberUtil.ordinal(buildCount), totalTime.getTime(), getCurrentPerformance(), tenuredStats.getRate(), tenuredStats.getUsage(), NumberUtil.formatBytes(tenuredStats.getMax()), permGenStats.getUsage(), NumberUtil.formatBytes(permGenStats.getMax()));
             } else {
-                return format("Starting %s build in daemon [uptime: %s, performance: %s%%, GC rate: %.2f/s, Old Gen usage: %s%% of %s]",
-                    NumberUtil.ordinal(buildCount), totalTime.getTime(), getCurrentPerformance(), stats.getRate(), stats.getUsage(), NumberUtil.formatBytes(stats.getMax()));
+                return format("Starting %s build in daemon [uptime: %s, performance: %s%%, GC rate: %.2f/s, tenured heap usage: %s%% of %s]",
+                    NumberUtil.ordinal(buildCount), totalTime.getTime(), getCurrentPerformance(), tenuredStats.getRate(), tenuredStats.getUsage(), NumberUtil.formatBytes(tenuredStats.getMax()));
             }
         }
     }
 
-    GarbageCollectionStats getOldGenStats() {
-        return gcMonitor.getOldGenStats();
+    GarbageCollectionStats getTenuredStats() {
+        return gcMonitor.getTenuredStats();
     }
 
     GarbageCollectionStats getPermGenStats() {

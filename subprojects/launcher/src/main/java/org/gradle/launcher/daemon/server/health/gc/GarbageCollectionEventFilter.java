@@ -16,20 +16,22 @@
 
 package org.gradle.launcher.daemon.server.health.gc;
 
-import com.sun.management.GarbageCollectionNotificationInfo;
+import org.gradle.api.logging.Logger;
+import org.gradle.api.logging.Logging;
 
 import javax.management.Notification;
 import javax.management.NotificationFilterSupport;
 import javax.management.openmbean.CompositeData;
+import java.lang.management.MemoryNotificationInfo;
+import java.util.List;
 
 public class GarbageCollectionEventFilter extends NotificationFilterSupport {
-    final String name;
-    final String action;
+    final Logger logger = Logging.getLogger(GarbageCollectionEventFilter.class);
+    final List<String> pools;
 
-    public GarbageCollectionEventFilter(String name, String action) {
-        this.name = name;
-        this.action = action;
-        this.enableType(GarbageCollectionNotificationInfo.GARBAGE_COLLECTION_NOTIFICATION);
+    public GarbageCollectionEventFilter(List<String> pools) {
+        this.pools = pools;
+        this.enableType(MemoryNotificationInfo.MEMORY_COLLECTION_THRESHOLD_EXCEEDED);
     }
 
     @Override
@@ -38,7 +40,8 @@ public class GarbageCollectionEventFilter extends NotificationFilterSupport {
     }
 
     private boolean matches(Notification notification) {
-        GarbageCollectionNotificationInfo info = GarbageCollectionNotificationInfo.from((CompositeData) notification.getUserData());
-        return info.getGcName().equals(name) && info.getGcAction().equals(action);
+        MemoryNotificationInfo info = MemoryNotificationInfo.from((CompositeData) notification.getUserData());
+        logger.warn("Received memory notification for " + info.getPoolName());
+        return pools.contains(info.getPoolName());
     }
 }
