@@ -308,7 +308,7 @@ gradle.addListener(new TaskExecutionListener() {
     }
 })
 
-allprojects { prj ->
+subprojects { prj ->
     task verifyTestFilesCleanup {
         ext.testDir = prj.fileTree("${prj.buildDir}/tmp/test files")
         ext.reportsDir = prj.file("${prj.buildDir}/reports")
