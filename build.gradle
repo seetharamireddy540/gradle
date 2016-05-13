@@ -307,3 +307,24 @@ gradle.addListener(new TaskExecutionListener() {
         preferencesTraceFile << "$descr , '${task.path}', ${userPrefsDirectory.absolutePath}, ${userPrefsDirectory.exists()}\n"
     }
 })
+
+allprojects { prj ->
+    task verifyTestFilesCleanup {
+        ext.testDir = prj.fileTree("${prj.buildDir}/tmp/test files")
+        ext.reportsDir = prj.file("${prj.buildDir}/reports")
+        ext.output = new File(reportsDir, 'remains.txt')
+        inputs.dir testDir
+        outputs.file output
+        doLast {
+            if (!reportsDir.exists()) {
+                reportsDir.mkdirs()
+            }
+            testDir.visit {
+                def f = it.getFile()
+                if (f.isFile()) {
+                    output << f.path + "\n"
+                }
+            }
+        }
+    }
+}
