@@ -18,7 +18,6 @@ package org.gradle.api.plugins.quality;
 import com.google.common.util.concurrent.Callables;
 import org.gradle.api.Action;
 import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.artifacts.DependencySet;
 import org.gradle.api.internal.ConventionMapping;
 import org.gradle.api.plugins.quality.internal.AbstractCodeQualityPlugin;
 import org.gradle.api.reporting.SingleFileReport;
@@ -64,12 +63,7 @@ public class CheckstylePlugin extends AbstractCodeQualityPlugin<Checkstyle> {
     }
 
     private void configureDefaultDependencies(Configuration configuration) {
-        configuration.defaultDependencies(new Action<DependencySet>() {
-            @Override
-            public void execute(DependencySet dependencies) {
-                dependencies.add(project.getDependencies().create("com.puppycrawl.tools:checkstyle:" + extension.getToolVersion()));
-            }
-        });
+        addDefaultDependencyTo(configuration, "com.puppycrawl.tools:checkstyle:" + extension.getToolVersion());
     }
 
     private void configureTaskConventionMapping(Configuration configuration, Checkstyle task) {

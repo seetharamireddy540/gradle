@@ -19,7 +19,6 @@ import com.google.common.util.concurrent.Callables;
 import groovy.lang.Closure;
 import org.gradle.api.Action;
 import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.artifacts.DependencySet;
 import org.gradle.api.file.ConfigurableFileTree;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.ConventionMapping;
@@ -90,12 +89,7 @@ public class FindBugsPlugin extends AbstractCodeQualityPlugin<FindBugs> {
     }
 
     private void configureDefaultDependencies(Configuration configuration) {
-        configuration.defaultDependencies(new Action<DependencySet>() {
-            @Override
-            public void execute(DependencySet dependencies) {
-                dependencies.add(project.getDependencies().create("com.google.code.findbugs:findbugs:" + extension.getToolVersion()));
-            }
-        });
+        addDefaultDependencyTo(configuration, "com.google.code.findbugs:findbugs:" + extension.getToolVersion());
     }
 
     private void configureTaskConventionMapping(Configuration configuration, FindBugs task) {

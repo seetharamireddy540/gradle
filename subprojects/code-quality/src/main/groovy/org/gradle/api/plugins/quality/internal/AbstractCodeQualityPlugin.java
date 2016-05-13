@@ -23,6 +23,7 @@ import org.gradle.api.Action;
 import org.gradle.api.Plugin;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.DependencySet;
 import org.gradle.api.internal.ConventionMapping;
 import org.gradle.api.internal.IConventionAware;
 import org.gradle.api.internal.project.ProjectInternal;
@@ -165,6 +166,15 @@ public abstract class AbstractCodeQualityPlugin<T extends Task> implements Plugi
             public void execute(SourceSet sourceSet) {
                 T task = project.getTasks().create(sourceSet.getTaskName(getTaskBaseName(), null), getTaskType());
                 configureForSourceSet(sourceSet, task);
+            }
+        });
+    }
+
+    protected void addDefaultDependencyTo(Configuration configuration, final String dependencyNotation) {
+        configuration.defaultDependencies(new Action<DependencySet>() {
+            @Override
+            public void execute(DependencySet dependencies) {
+                dependencies.add(project.getDependencies().create(dependencyNotation));
             }
         });
     }

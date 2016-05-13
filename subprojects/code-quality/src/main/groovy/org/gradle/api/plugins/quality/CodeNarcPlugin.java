@@ -18,7 +18,6 @@ package org.gradle.api.plugins.quality;
 import com.google.common.util.concurrent.Callables;
 import org.gradle.api.Action;
 import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.artifacts.DependencySet;
 import org.gradle.api.file.SourceDirectorySet;
 import org.gradle.api.internal.ConventionMapping;
 import org.gradle.api.internal.plugins.DslObject;
@@ -71,12 +70,7 @@ public class CodeNarcPlugin extends AbstractCodeQualityPlugin<CodeNarc> {
     }
 
     private void configureDefaultDependencies(Configuration configuration) {
-        configuration.defaultDependencies(new Action<DependencySet>() {
-            @Override
-            public void execute(DependencySet dependencies) {
-                dependencies.add(project.getDependencies().create("org.codenarc:CodeNarc:" + extension.getToolVersion()));
-            }
-        });
+        addDefaultDependencyTo(configuration, "org.codenarc:CodeNarc:" + extension.getToolVersion());
     }
 
     private void configureTaskConventionMapping(Configuration configuration, CodeNarc task) {
